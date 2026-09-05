@@ -169,7 +169,20 @@ func (c *franzConsumer) processPartitionBatch(ctx context.Context, pc *pc, p kgo
 	var fatalRecord *kgo.Record
 	fatalIsPermanent := false
 	var lastProcessed *kgo.Record
+records:
 	for _, msg := range p.Records {
+		// A partition can be revoked while the previous message is being
+		// processed. Stop before marking or handing the next record downstream;
+		// otherwise the revoked consumer can commit records that belong to the
+		// replacement owner. During receiver shutdown, keep draining the batch
+		// so in-flight records retain the existing graceful-shutdown behavior.
+		if pc.ctx.Err() != nil {
+			select {
+			case <-c.closing:
+			default:
+				break records
+			}
+		}
 		if !c.config.MessageMarking.After {
 			c.markCommitRecords(pc, p.Topic, p.Partition, msg)
 		}

@@ -5,6 +5,7 @@ package kafkareceiver
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -125,4 +126,45 @@ func TestProcessPartitionBatchMarkOwnership(t *testing.T) {
 			require.Empty(t, marked)
 		})
 	}
+}
+
+func TestProcessPartitionBatchStopsWhenPartitionIsCanceled(t *testing.T) {
+	const topic = "test"
+	kafkaClient, cfg := mustNewMarkedFakeCluster(t, kfake.SeedTopics(1, topic))
+	settings, _, _ := mustNewSettings(t)
+	consumer, err := newFranzKafkaConsumer(cfg, settings, []string{topic}, nil, nil)
+	require.NoError(t, err)
+	consumer.client = kafkaClient
+
+	ctx, cancel := context.WithCancelCause(t.Context())
+	t.Cleanup(func() { cancel(nil) })
+	partitionConsumer := &pc{
+		logger: settings.Logger,
+		ctx:    ctx,
+		cancel: cancel,
+		attrs:  attribute.NewSet(),
+	}
+
+	processed := 0
+	consumer.consumeMessage = func(context.Context, *kgo.Record, attribute.Set) error {
+		processed++
+		if processed == 1 {
+			partitionConsumer.cancelContext(errors.New("partition revoked"))
+			return errors.New("processing interrupted")
+		}
+		return nil
+	}
+
+	batch := kgo.FetchTopicPartition{
+		Topic:          topic,
+		FetchPartition: kgo.FetchPartition{Partition: 0, HighWatermark: 200},
+	}
+	for offset := int64(0); offset < 200; offset++ {
+		batch.Records = append(batch.Records, &kgo.Record{
+			Topic: topic, Partition: 0, Offset: offset,
+		})
+	}
+
+	consumer.processPartitionBatch(ctx, partitionConsumer, batch)
+	require.Equal(t, 1, processed)
 }
