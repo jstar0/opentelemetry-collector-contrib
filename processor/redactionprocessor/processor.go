@@ -615,7 +615,15 @@ func makeAllowList(c *Config) map[string]string {
 	// span attributes (e.g. `notes`, `description`), then it will those
 	// attribute keys in `redaction.masked.keys` and set the
 	// `redaction.masked.count` to 2
-	redactionKeys := []string{redactionRedactedKeys, redactionRedactedCount, redactionMaskedKeys, redactionMaskedCount, redactionIgnoredCount}
+	redactionKeys := []string{
+		redactionRedactedKeys,
+		redactionRedactedCount,
+		redactionMaskedKeys,
+		redactionMaskedCount,
+		redactionAllowedKeys,
+		redactionAllowedCount,
+		redactionIgnoredCount,
+	}
 	// allowList consists of the keys explicitly allowed by the configuration
 	// as well as of the new span attributes that the processor creates to
 	// summarize its changes

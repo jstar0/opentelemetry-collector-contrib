@@ -36,6 +36,34 @@ type testConfig struct {
 	config        *Config
 }
 
+func TestAllowedSummaryAttributesSurviveReentry(t *testing.T) {
+	config := &Config{
+		AllowedKeys:   []string{"email"},
+		AllowedValues: []string{"@example.com$"},
+		Summary:       "debug",
+	}
+	processor, err := newRedaction(t.Context(), config, zaptest.NewLogger(t))
+	require.NoError(t, err)
+
+	traces := ptrace.NewTraces()
+	span := traces.ResourceSpans().AppendEmpty().ScopeSpans().AppendEmpty().Spans().AppendEmpty()
+	span.Attributes().PutStr("email", "user@example.com")
+
+	_, err = processor.processTraces(t.Context(), traces)
+	require.NoError(t, err)
+	_, err = processor.processTraces(t.Context(), traces)
+	require.NoError(t, err)
+
+	allowedKeys, ok := span.Attributes().Get(redactionAllowedKeys)
+	require.True(t, ok)
+	assert.Contains(t, strings.Split(allowedKeys.Str(), attrValuesSeparator), "email")
+	allowedCount, ok := span.Attributes().Get(redactionAllowedCount)
+	require.True(t, ok)
+	assert.GreaterOrEqual(t, allowedCount.Int(), int64(1))
+	_, ok = span.Attributes().Get(redactionRedactedKeys)
+	assert.False(t, ok)
+}
+
 // TestRedactUnknownAttributes validates that the processor deletes span
 // attributes that are not the allowed keys list
 func TestRedactUnknownAttributes(t *testing.T) {
