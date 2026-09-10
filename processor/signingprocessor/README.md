@@ -121,6 +121,11 @@ canonicalises it with RFC 8785 (JCS), and hashes the result.  All
 `audit.integrity.*` attributes are excluded so the signature can be verified before
 those attributes are removed.
 
+Timestamp fields and `int64` attribute values are encoded as decimal JSON strings
+before canonicalisation. This preserves the full 64-bit value because JCS numbers
+follow the IEEE-754-compatible JSON number range and cannot represent every
+nanosecond timestamp or large integer exactly.
+
 ```
 event_name, body, timestamp, observed_timestamp, severity_number, severity_text,
 trace_id, span_id, attributes (all except audit.integrity.*)

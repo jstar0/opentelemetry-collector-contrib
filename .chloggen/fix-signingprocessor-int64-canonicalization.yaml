@@ -1,0 +1,6 @@
+change_type: bug_fix
+component: processor/signing
+note: Preserve 64-bit timestamps and integer attributes in signed log records to prevent precision loss during JCS canonicalization.
+issues: [50881]
+subtext: 64-bit values are encoded as decimal JSON strings before canonicalization so distinct records cannot share a signature because of IEEE-754 rounding.
+change_logs: [user]

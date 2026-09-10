@@ -15,6 +15,7 @@ import (
 	"encoding/json"
 	"hash"
 	"math/big"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -76,10 +77,10 @@ func verifyRecord(t *testing.T, lr plog.LogRecord, pubKey *rsa.PublicKey) {
 		data["body"] = lr.Body().Str()
 	}
 	if lr.Timestamp() != 0 {
-		data["timestamp"] = lr.Timestamp().AsTime().UnixNano()
+		data["timestamp"] = strconv.FormatInt(lr.Timestamp().AsTime().UnixNano(), 10)
 	}
 	if lr.ObservedTimestamp() != 0 {
-		data["observed_timestamp"] = lr.ObservedTimestamp().AsTime().UnixNano()
+		data["observed_timestamp"] = strconv.FormatInt(lr.ObservedTimestamp().AsTime().UnixNano(), 10)
 	}
 	if lr.SeverityNumber() != 0 {
 		data["severity_number"] = lr.SeverityNumber()
@@ -122,6 +123,81 @@ func verifyRecord(t *testing.T, lr plog.LogRecord, pubKey *rsa.PublicKey) {
 	if err := rsa.VerifyPKCS1v15(pubKey, crypto.SHA256, computedHash[:], sigBytes); err != nil {
 		t.Errorf("signature verification failed: %v", err)
 	}
+}
+
+// TestSerializeLogRecordPreservesInt64Values ensures values that cannot be
+// represented exactly by an IEEE-754 double remain distinct in the signed
+// canonical payload.
+func TestSerializeLogRecordPreservesInt64Values(t *testing.T) {
+	p := &signingProcessor{}
+
+	const timestamp int64 = 1789043696123456789
+	const attribute int64 = 1815349285730881537
+
+	t.Run("timestamp", func(t *testing.T) {
+		makeRecord := func(ts int64) plog.LogRecord {
+			lr := plog.NewLogRecord()
+			lr.SetTimestamp(pcommon.Timestamp(ts))
+			lr.SetObservedTimestamp(pcommon.Timestamp(ts + 1))
+			return lr
+		}
+
+		first, err := p.serializeLogRecord(makeRecord(timestamp))
+		if err != nil {
+			t.Fatal(err)
+		}
+		second, err := p.serializeLogRecord(makeRecord(timestamp + 1))
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if bytes.Equal(first, second) {
+			t.Fatalf("timestamps one nanosecond apart produced the same payload: %s", first)
+		}
+		if !bytes.Contains(first, []byte(`"timestamp":"1789043696123456789"`)) {
+			t.Fatalf("timestamp was not preserved as an exact JSON string: %s", first)
+		}
+		if !bytes.Contains(first, []byte(`"observed_timestamp":"1789043696123456790"`)) {
+			t.Fatalf("observed timestamp was not preserved as an exact JSON string: %s", first)
+		}
+	})
+
+	t.Run("integer attribute", func(t *testing.T) {
+		makeRecord := func(value int64) plog.LogRecord {
+			lr := plog.NewLogRecord()
+			lr.Attributes().PutInt("user.id", value)
+			return lr
+		}
+
+		first, err := p.serializeLogRecord(makeRecord(attribute))
+		if err != nil {
+			t.Fatal(err)
+		}
+		second, err := p.serializeLogRecord(makeRecord(attribute + 1))
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if bytes.Equal(first, second) {
+			t.Fatalf("integer attributes one apart produced the same payload: %s", first)
+		}
+		if !bytes.Contains(first, []byte(`"user.id":"1815349285730881537"`)) {
+			t.Fatalf("integer attribute was not preserved as an exact JSON string: %s", first)
+		}
+	})
+
+	t.Run("maximum integer", func(t *testing.T) {
+		lr := plog.NewLogRecord()
+		lr.Attributes().PutInt("max", int64(1<<63-1))
+
+		payload, err := p.serializeLogRecord(lr)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Contains(payload, []byte(`"max":"9223372036854775807"`)) {
+			t.Fatalf("maximum integer was not preserved as an exact JSON string: %s", payload)
+		}
+	})
 }
 
 // TestSignVerifyBasic covers the happy-path: body + timestamp + attributes.
