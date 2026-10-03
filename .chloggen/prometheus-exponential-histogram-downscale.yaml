@@ -1,0 +1,6 @@
+change_type: bug_fix
+component: exporter/prometheus
+note: Fix downscaling of delta exponential histogram buckets.
+issues: [51705]
+subtext:
+change_logs: [user]

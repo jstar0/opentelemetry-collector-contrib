@@ -725,6 +725,41 @@ func TestAccumulateDeltaToCumulativeExponentialHistogram(t *testing.T) {
 		require.Equal(t, ts2.Unix(), dp.Timestamp().AsTime().Unix())
 	})
 
+	t.Run("AccumulateUnalignedDownscalePreservesBucketPopulation", func(t *testing.T) {
+		startTs := time.Now().Add(-6 * time.Second)
+		ts1 := time.Now().Add(-5 * time.Second)
+		ts2 := time.Now().Add(-4 * time.Second)
+
+		rm := pmetric.NewResourceMetrics()
+		ilm := rm.ScopeMetrics().AppendEmpty()
+		ilm.Scope().SetName("test")
+
+		// The first bucket's source and destination are both index 0 after downscaling.
+		appendDeltaNative(
+			startTs, ts1, 20, -1, []uint64{100, 7, 3, 2000}, 0, nil, 0, 2110, 0, false, 0, false, 0, ilm.Metrics(),
+		)
+		m2 := appendDeltaNative(
+			ts1, ts2, 18, 0, []uint64{5}, 0, nil, 0, 5, 0, false, 0, false, 0, ilm.Metrics(),
+		)
+
+		a := newAccumulator(zap.NewNop(), 1*time.Hour).(*lastValueAccumulator)
+		require.Equal(t, 2, a.Accumulate(rm))
+
+		sig := timeseriesSignature(
+			ilm.Scope().Name(), ilm.Scope().Version(), ilm.SchemaUrl(), ilm.Scope().Attributes(),
+			m2, m2.ExponentialHistogram().DataPoints().At(0).Attributes(), pcommon.NewMap(),
+		)
+		got, ok := a.registeredMetrics.Load(sig)
+		require.True(t, ok)
+		dp := got.(*accumulatedValue).value.ExponentialHistogram().DataPoints().At(0)
+
+		require.Equal(t, int32(18), dp.Scale())
+		require.Equal(t, int32(-1), dp.Positive().Offset())
+		require.Equal(t, []uint64{100, 2015}, dp.Positive().BucketCounts().AsRaw())
+		require.Equal(t, uint64(2115), dp.Count())
+		require.Equal(t, dp.Count(), dp.ZeroCount()+dp.Positive().BucketCounts().At(0)+dp.Positive().BucketCounts().At(1))
+	})
+
 	t.Run("CumulativeKeepLatest", func(t *testing.T) {
 		rm := pmetric.NewResourceMetrics()
 		ilm := rm.ScopeMetrics().AppendEmpty()
